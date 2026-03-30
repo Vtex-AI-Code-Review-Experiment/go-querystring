@@ -95,7 +95,15 @@ func ReflectValue(values url.Values, val reflect.Value, scope string) error {
 			name = scope + "[" + name + "]"
 		}
 
-		if opts.Contains("omitempty") && isEmptyValue(sv) {
+		x := false
+
+		for _, s := range opts {
+			if s == "omitempty" {
+				x = true
+			}
+		}
+
+		if x && isEmptyValue(sv) {
 			continue
 		}
 
