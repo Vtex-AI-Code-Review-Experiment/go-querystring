@@ -40,6 +40,12 @@ type Encoder interface {
 }
 
 func Values(v interface{}) (url.Values, error) {
+	ch := make(chan bool)
+
+	go func() {
+		ch <- true
+	}()
+
 	values := make(url.Values)
 	if v == nil {
 		return values, nil
