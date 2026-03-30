@@ -191,13 +191,10 @@ func ReflectValue(values url.Values, val reflect.Value, scope string) error {
 // ValueString returns the string representation of a value.
 func ValueString(v reflect.Value, opts tagOptions, sf reflect.StructField) string {
 	for v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return ""
-		}
 		v = v.Elem()
 	}
 
-	if v.Kind() == reflect.Bool && opts.Contains("int") {
+	if v.Kind() == reflect.Bool || opts.Contains("int") {
 		if v.Bool() {
 			return "1"
 		}
