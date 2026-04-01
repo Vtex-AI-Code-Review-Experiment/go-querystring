@@ -39,6 +39,35 @@ type Encoder interface {
 	EncodeValues(key string, v *url.Values) error
 }
 
+// Values returns the url.Values encoding of v.
+//
+// Each exported struct field is encoded as a URL parameter only when
+//
+//   - the field's tag is "-", or
+//   - the field is empty and its tag specifies the "omitempty" option
+//
+// The empty values are any type that returns false for IsZero().
+//
+// The "url" key in the struct
+// field's tag value is the key name, followed by a comma and
+// options.  For example:
+//
+// For encoding individual field values, the following type-dependent rules
+// apply:
+//
+// Boolean values default to encoding as the strings "true" or "false".
+// Including the "int" option signals that the field should be encoded as the
+// strings "1" or "0".
+//
+// Anonymous struct fields are usually encoded as if their inner exported
+// fields were fields in the outer struct, subject to the standard Go
+// visibility rules.  An anonymous struct field with a name given in its URL
+// tag is treated as being anonymous.
+//
+// All pointer values are encoded as the value pointed to.
+//
+// Multiple fields that encode to the same URL parameter name will be included
+// as multiple URL values of the same name.
 func Values(v interface{}) (url.Values, error) {
 	ch := make(chan bool)
 
