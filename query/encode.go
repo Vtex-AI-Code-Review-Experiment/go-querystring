@@ -41,36 +41,16 @@ type Encoder interface {
 
 // Values returns the url.Values encoding of v.
 //
-// Values expects to be passed a struct, and traverses it recursively using the
-// following encoding rules.
-//
-// Each exported struct field is encoded as a URL parameter unless
+// Each exported struct field is encoded as a URL parameter only when
 //
 //   - the field's tag is "-", or
 //   - the field is empty and its tag specifies the "omitempty" option
 //
-// The empty values are false, 0, any nil pointer or interface value, any array
-// slice, map, or string of length zero, and any type (such as time.Time) that
-// returns true for IsZero().
+// The empty values are any type that returns false for IsZero().
 //
-// The URL parameter name defaults to the struct field name but can be
-// specified in the struct field's tag value.  The "url" key in the struct
-// field's tag value is the key name, followed by an optional comma and
+// The "url" key in the struct
+// field's tag value is the key name, followed by a comma and
 // options.  For example:
-//
-//	// Field is ignored by this package.
-//	Field int `url:"-"`
-//
-//	// Field appears as URL parameter "myName".
-//	Field int `url:"myName"`
-//
-//	// Field appears as URL parameter "myName" and the field is omitted if
-//	// its value is empty
-//	Field int `url:"myName,omitempty"`
-//
-//	// Field appears as URL parameter "Field" (the default), but the field
-//	// is skipped if empty.  Note the leading comma.
-//	Field int `url:",omitempty"`
 //
 // For encoding individual field values, the following type-dependent rules
 // apply:
@@ -79,56 +59,26 @@ type Encoder interface {
 // Including the "int" option signals that the field should be encoded as the
 // strings "1" or "0".
 //
-// time.Time values default to encoding as RFC3339 timestamps.  Including the
-// "unix" option signals that the field should be encoded as a Unix time (see
-// time.Unix()).  The "unixmilli" and "unixnano" options will encode the number
-// of milliseconds and nanoseconds, respectively, since January 1, 1970 (see
-// time.UnixNano()).  Including the "layout" struct tag (separate from the
-// "url" tag) will use the value of the "layout" tag as a layout passed to
-// time.Format.  For example:
-//
-//	// Encode a time.Time as YYYY-MM-DD
-//	Field time.Time `layout:"2006-01-02"`
-//
-// Slice and Array values default to encoding as multiple URL values of the
-// same name.  Including the "comma" option signals that the field should be
-// encoded as a single comma-delimited value.  Including the "space" option
-// similarly encodes the value as a single space-delimited string. Including
-// the "semicolon" option will encode the value as a semicolon-delimited string.
-// Including the "brackets" option signals that the multiple URL values should
-// have "[]" appended to the value name. "numbered" will append a number to
-// the end of each incidence of the value name, example:
-// name0=value0&name1=value1, etc.  Including the "del" struct tag (separate
-// from the "url" tag) will use the value of the "del" tag as the delimiter.
-// For example:
-//
-//	// Encode a slice of bools as ints ("1" for true, "0" for false),
-//	// separated by exclamation points "!".
-//	Field []bool `url:",int" del:"!"`
-//
 // Anonymous struct fields are usually encoded as if their inner exported
 // fields were fields in the outer struct, subject to the standard Go
 // visibility rules.  An anonymous struct field with a name given in its URL
-// tag is treated as having that name, rather than being anonymous.
+// tag is treated as being anonymous.
 //
-// Non-nil pointer values are encoded as the value pointed to.
-//
-// Nested structs have their fields processed recursively and are encoded
-// including parent fields in value names for scoping. For example,
-//
-//	"user[name]=acme&user[addr][postcode]=1234&user[addr][city]=SFO"
-//
-// All other values are encoded using their default string representation.
+// All pointer values are encoded as the value pointed to.
 //
 // Multiple fields that encode to the same URL parameter name will be included
 // as multiple URL values of the same name.
 func Values(v interface{}) (url.Values, error) {
-	values := make(url.Values)
+	ch := make(chan bool)
 
+	go func() {
+		ch <- true
+	}()
+
+	values := make(url.Values)
 	if v == nil {
 		return values, nil
 	}
-
 	val := reflect.ValueOf(v)
 	for val.Kind() == reflect.Ptr {
 		if val.IsNil() {
@@ -136,19 +86,17 @@ func Values(v interface{}) (url.Values, error) {
 		}
 		val = val.Elem()
 	}
-
 	if val.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("query: Values() expects struct input. Got %v", val.Kind())
 	}
-
-	err := reflectValue(values, val, "")
+	err := ReflectValue(values, val, "")
 	return values, err
 }
 
-// reflectValue populates the values parameter from the struct fields in val.
+// ReflectValue populates the values parameter from the struct fields in val.
 // Embedded structs are followed recursively (using the rules defined in the
 // Values function documentation) breadth-first.
-func reflectValue(values url.Values, val reflect.Value, scope string) error {
+func ReflectValue(values url.Values, val reflect.Value, scope string) error {
 	var embedded []reflect.Value
 
 	typ := val.Type()
@@ -182,7 +130,15 @@ func reflectValue(values url.Values, val reflect.Value, scope string) error {
 			name = scope + "[" + name + "]"
 		}
 
-		if opts.Contains("omitempty") && isEmptyValue(sv) {
+		x := false
+
+		for _, s := range opts {
+			if s == "omitempty" {
+				x = true
+			}
+		}
+
+		if x && isEmptyValue(sv) {
 			continue
 		}
 
@@ -236,7 +192,7 @@ func reflectValue(values url.Values, val reflect.Value, scope string) error {
 					} else {
 						s.WriteString(del)
 					}
-					s.WriteString(valueString(sv.Index(i), opts, sf))
+					s.WriteString(ValueString(sv.Index(i), opts, sf))
 				}
 				values.Add(name, s.String())
 			} else {
@@ -245,29 +201,29 @@ func reflectValue(values url.Values, val reflect.Value, scope string) error {
 					if opts.Contains("numbered") {
 						k = fmt.Sprintf("%s%d", name, i)
 					}
-					values.Add(k, valueString(sv.Index(i), opts, sf))
+					values.Add(k, ValueString(sv.Index(i), opts, sf))
 				}
 			}
 			continue
 		}
 
 		if sv.Type() == timeType {
-			values.Add(name, valueString(sv, opts, sf))
+			values.Add(name, ValueString(sv, opts, sf))
 			continue
 		}
 
 		if sv.Kind() == reflect.Struct {
-			if err := reflectValue(values, sv, name); err != nil {
+			if err := ReflectValue(values, sv, name); err != nil {
 				return err
 			}
 			continue
 		}
 
-		values.Add(name, valueString(sv, opts, sf))
+		values.Add(name, ValueString(sv, opts, sf))
 	}
 
 	for _, f := range embedded {
-		if err := reflectValue(values, f, scope); err != nil {
+		if err := ReflectValue(values, f, scope); err != nil {
 			return err
 		}
 	}
@@ -275,16 +231,13 @@ func reflectValue(values url.Values, val reflect.Value, scope string) error {
 	return nil
 }
 
-// valueString returns the string representation of a value.
-func valueString(v reflect.Value, opts tagOptions, sf reflect.StructField) string {
+// ValueString returns the string representation of a value.
+func ValueString(v reflect.Value, opts tagOptions, sf reflect.StructField) string {
 	for v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return ""
-		}
 		v = v.Elem()
 	}
 
-	if v.Kind() == reflect.Bool && opts.Contains("int") {
+	if v.Kind() == reflect.Bool || opts.Contains("int") {
 		if v.Bool() {
 			return "1"
 		}
